@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./sa help)",
+      "Bash(./sa accounts)",
+      "Bash(./sa probe *)",
+      "Bash(./sa frames *)",
+      "Bash(./sa transcribe *)",
+      "Bash(./sa render-video *)",
+      "Bash(./sa render-image *)",
+      "Bash(./sa slideshow *)",
+      "Bash(./sa drafts *)",
+      "Edit(./drafts/**)"
+    ],
+    "ask": [
+      "Bash(./sa publish *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./secrets/**)",
+      "Bash(./sa connect *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/gate_publish.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

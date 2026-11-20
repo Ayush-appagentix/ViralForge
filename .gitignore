@@ -1,0 +1,8 @@
+.env
+secrets/
+drafts/
+posted/
+inbox/
+.cache/
+__pycache__/
+*.pyc

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Social agent toolbox. Run from the project folder:  ./sa <command> [options]
+#
+# Editing (safe, no posting):
+#   ./sa probe <video>                      video facts (length, size, orientation, audio)
+#   ./sa frames <video> <out.jpg>           snapshot grid so Claude can see a video
+#   ./sa transcribe <video> <draft_dir>     speech -> timed text (free, offline)
+#   ./sa render-video <draft_dir>           apply edit_plan.json -> final.mp4
+#   ./sa render-image <file.html> [--size]  design (HTML) -> post.png + post.jpg
+#   ./sa slideshow <draft_dir>              slides/*.html -> short video (Reels/Shorts)
+#   ./sa drafts <list|new|show|check|reject|mark-posted|history> ...
+#   ./sa accounts                           connected accounts (no secrets shown)
+#
+# Posting (always asks you first):
+#   ./sa publish <draft_dir> [--at "YYYY-MM-DD HH:MM"] [--only platform:account,...] [--cancel]
+#
+# One-time setup (run these yourself in the terminal, not through Claude):
+#   ./sa connect <meta|youtube|linkedin> [--alias NAME]
+#   ./sa schedule-daily <HH:MM|--off|--status>
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY="${SOCIAL_AGENT_PYTHON:-$HOME/.venvs/social-agent/bin/python}"
+export PATH="$HOME/.local/bin:$PATH"
+
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  help|-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+esac
+script="$ROOT/scripts/${cmd//-/_}.py"
+if [ ! -f "$script" ]; then
+  echo "Unknown command: $cmd   (see: ./sa help)" >&2
+  exit 2
+fi
+if [ ! -x "$PY" ]; then
+  echo "Python environment missing at $PY - see SETUP.md step 1." >&2
+  exit 2
+fi
+cd "$ROOT"
+exec "$PY" "$script" "$@"
