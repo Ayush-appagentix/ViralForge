@@ -7,6 +7,8 @@ To add a platform, drop in <name>.py with:
   ACCOUNTS_FROM = "<name>"                 # optional: reuse another platform's connected accounts
   def check(target, media, info) -> list[str]      # problems that would make posting fail
   def publish(target, media, account, ctx) -> dict # {"id", "url"}; assisted returns {"manual": True, ...}
+  def warnings(target, draft) -> list[str]        # optional: non-blocking hints shown by drafts check
+  def edit(target, account, post_id, caption, brand=None)  # optional: change a live post's caption (./sa edit-post)
 """
 from __future__ import annotations
 

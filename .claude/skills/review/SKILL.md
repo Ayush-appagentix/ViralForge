@@ -9,6 +9,9 @@ description: Review social media drafts waiting for the user (daily drafts, sche
 3. Ask with AskUserQuestion, depending on status:
    - **pending** → Post now / Schedule / Change something / Skip for now / Discard
    - **scheduled** → Keep schedule / Post now instead / Cancel schedule (`./sa publish <draft> --cancel`)
+   - **needs_check** → a platform may have posted without confirming. Ask the user to look at that
+     account: live → `./sa drafts mark-posted <draft> <platform:account> [url]`; not live →
+     `./sa drafts reset <draft> <platform:account>`, then retry (needs approval). Never retry blindly.
    - **partial / failed** → show the errors; Retry failed ones / Change something / Discard
    - **awaiting_manual** → "Did you post it?" → `./sa drafts mark-posted <draft> <platform:account> [url]`,
      or redo the assisted step with `./sa publish <draft> --only <platform:account>`

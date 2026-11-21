@@ -5,7 +5,7 @@ from pathlib import Path
 
 import requests
 
-from common import PublishError, env
+from common import PublishError, env, http
 
 GRAPH = "https://graph.facebook.com"
 
@@ -34,13 +34,14 @@ def check(r: requests.Response) -> dict:
 
 
 def get(path: str, token: str, **params) -> dict:
-    return check(requests.get(url(path), params={**params, "access_token": token}, timeout=60))
+    return check(http("GET", url(path), params={**params, "access_token": token}, what=f"Meta GET {path}"))
 
 
 def post(path: str, token: str, data: dict | None = None, files: dict | None = None,
-         timeout: int = 300) -> dict:
-    return check(requests.post(url(path), data={**(data or {}), "access_token": token},
-                               files=files, timeout=timeout))
+         timeout: int = 300, final: bool = False) -> dict:
+    """final=True for the call that makes the post public (see common.http)."""
+    return check(http("POST", url(path), data={**(data or {}), "access_token": token}, files=files,
+                      timeout=timeout, final=final, what=f"Meta POST {path}"))
 
 
 def rupload(upload_url: str, token: str, file: Path, extra_headers: dict | None = None) -> dict:
@@ -48,7 +49,7 @@ def rupload(upload_url: str, token: str, file: Path, extra_headers: dict | None 
     headers = {"Authorization": f"OAuth {token}", "offset": "0",
                "file_size": str(file.stat().st_size), **(extra_headers or {})}
     with file.open("rb") as f:
-        return check(requests.post(upload_url, headers=headers, data=f, timeout=1800))
+        return check(http("POST", upload_url, headers=headers, data=f, timeout=1800, what="Meta upload"))
 
 
 def largest_image_url(photo_id: str, token: str) -> str:
@@ -64,9 +65,9 @@ def host_image(page_id: str, page_token: str, media: Path) -> str:
     uploads to a free temporary host instead (opt-in, set in .env)."""
     if env("IG_IMAGE_HOST", "facebook") == "litterbox":
         with media.open("rb") as f:
-            r = requests.post("https://litterbox.catbox.moe/resources/internals/api.php",
-                              data={"reqtype": "fileupload", "time": "1h"},
-                              files={"fileToUpload": (media.name, f, "image/jpeg")}, timeout=300)
+            r = http("POST", "https://litterbox.catbox.moe/resources/internals/api.php",
+                     data={"reqtype": "fileupload", "time": "1h"},
+                     files={"fileToUpload": (media.name, f, "image/jpeg")}, timeout=300, what="temp image host")
         if r.ok and r.text.strip().startswith("https://"):
             return r.text.strip()
         raise PublishError(f"Temporary image host failed: {r.text[:200]}")

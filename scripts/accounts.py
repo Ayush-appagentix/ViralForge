@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 import time
 
-from common import load_accounts, save_accounts
+from common import load_accounts, platform_group, save_accounts
 
 PLATFORMS = ["facebook", "instagram", "youtube", "linkedin"]
 
@@ -21,8 +21,13 @@ def describe(platform: str, acc: dict) -> str:
             "linkedin": acc.get("name")}.get(platform, "")
     exp = acc.get("expires_at")
     if exp:
-        days = int((exp - time.time()) / 86400)
-        name += f"   login {'EXPIRED' if days < 0 else f'expires in {days} days'}"
+        days = int((exp - time.time()) // 86400)
+        if days < 0:
+            name += f"   login EXPIRED - run: ./sa connect {platform_group(platform)}"
+        elif days <= 7:
+            name += f"   login expires in {days} day(s) - reconnect soon: ./sa connect {platform_group(platform)}"
+        else:
+            name += f"   login expires in {days} days"
     return name
 
 

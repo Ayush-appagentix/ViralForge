@@ -37,12 +37,15 @@ Look at the result yourself (Read `preview.jpg` / `post.jpg`). Fix anything off 
 ## 4. Write the post
 Fill `draft.json`: `media`, `alt_text`, `topic`, `source: "user"`, and one target per platform+account,
 written for that platform in the brand's voice:
-- **instagram**: strong first line (hook), short paragraphs, call to action, 3–8 relevant hashtags at the end.
-- **facebook**: conversational, 0–3 hashtags.
-- **linkedin**: professional, insight-first, short lines, 3–5 hashtags, no clickbait.
+Write like the user typing it themselves, not like a content template (see **Writing captions** in CLAUDE.md):
+- **linkedin**: first person, a few short plain paragraphs, one real point of view, at most 3 hashtags at the end.
+  No arrow lists, no slogan opener, no recap of what the image already shows.
+- **instagram**: a natural first line, short paragraphs, a soft call to action, up to 8 relevant hashtags.
+- **facebook**: conversational, 0–2 hashtags.
 - **youtube**: `title` ≤100 chars (no `<` `>`), `description` with 2–3 hashtags (#Shorts if vertical ≤3 min), `tags`.
 - **youtube_community**: short and conversational; a question works well.
-Set `status` to `"pending"`, then `./sa drafts check <draft>` and fix every problem it lists.
+Set `status` to `"pending"`, then `./sa drafts check <draft>` and fix every problem it lists, **including every Voice warning**
+(rewrite the caption in plainer words; don't just delete the flagged phrase).
 
 ## 5. Approval (never skip)
 Show the user: links to the media and preview (e.g. `[final.mp4](drafts/<id>/final.mp4)`), each target's
@@ -56,6 +59,7 @@ Mention that Claude Code will show one more permission prompt — that's the fin
 
 ## 6. After publishing
 Report each target with its link or the error in plain words. Failed → explain the fix; ask before running
-publish again (it only retries what failed). Assisted targets (youtube_community, facebook_profile) →
+publish again (it only retries what failed). **NOT SURE IT POSTED / needs_check** → never retry; ask the
+user to check the platform, then `./sa drafts mark-posted ...` (live) or `./sa drafts reset ...` (not live). Assisted targets (youtube_community, facebook_profile) →
 walk the user through the printed steps; when they say it's posted, run
 `./sa drafts mark-posted <draft> <platform:account> [post-url]`.

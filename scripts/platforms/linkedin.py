@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import requests
 
-from common import PublishError, env
+from common import BRANDS, PublishError, env, http
 
 LABEL = "LinkedIn (personal profile)"
 MODE = "api"
@@ -31,6 +31,37 @@ def escape(text: str) -> str:
         else:
             out.append("".join("\\" + c if c in RESERVED else c for c in part))
     return "".join(out)
+
+
+def load_mentions(brand: str | None) -> dict[str, str]:
+    """brands/<brand>/mentions.json: {"Replit": "urn:li:organization:1234", ...} (keys starting with _ ignored)."""
+    import json
+    f = BRANDS / (brand or "main") / "mentions.json"
+    if not f.exists():
+        return {}
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise PublishError(f"{f.relative_to(BRANDS.parent)} is not valid JSON: {e}")
+    return {k: v for k, v in data.items() if not k.startswith("_") and re.fullmatch(r"urn:li:(organization|person):[\w-]+", str(v))}
+
+
+def expand_mentions(text: str, brand: str | None) -> str:
+    """Turn @Replit into a real LinkedIn tag when brands/<brand>/mentions.json knows its URN."""
+    known = load_mentions(brand)
+    if not known:
+        return text
+    names = sorted(known, key=len, reverse=True)
+    pattern = re.compile(r"(?<![\w@\[])@(" + "|".join(re.escape(n) for n in names) + r")(?![\w])")
+    return pattern.sub(lambda m: f"@[{m.group(1)}]({known[m.group(1)]})", text)
+
+
+def warnings(target, draft) -> list[str]:
+    """@Names in the caption that won't become real tags."""
+    known = load_mentions(draft.get("brand"))
+    loose = set(re.findall(r"(?<![\w@\[])@([A-Z][\w.&-]*)", target.get("caption") or "")) - set(known)
+    return [f"@{n} is plain text, not a tag - add its URN to brands/{draft.get('brand') or 'main'}/mentions.json"
+            for n in sorted(loose)]
 
 
 def check(target, media, info) -> list[str]:
@@ -66,16 +97,17 @@ def ok(r: requests.Response) -> requests.Response:
 
 
 def upload_image(path, owner: str, token: str) -> str:
-    r = ok(requests.post(f"{API}/images?action=initializeUpload", headers=headers(token),
-                         json={"initializeUploadRequest": {"owner": owner}}, timeout=60)).json()["value"]
+    r = ok(http("POST", f"{API}/images?action=initializeUpload", headers=headers(token),
+                json={"initializeUploadRequest": {"owner": owner}}, what="LinkedIn image init")).json()["value"]
     with path.open("rb") as f:
-        ok(requests.put(r["uploadUrl"], headers={"Authorization": f"Bearer {token}"}, data=f, timeout=600))
+        ok(http("PUT", r["uploadUrl"], headers={"Authorization": f"Bearer {token}"}, data=f, timeout=600,
+                what="LinkedIn image upload"))
     return r["image"]
 
 
 def upload_video(path, owner: str, token: str) -> str:
     size = path.stat().st_size
-    v = ok(requests.post(f"{API}/videos?action=initializeUpload", headers=headers(token), timeout=60,
+    v = ok(http("POST", f"{API}/videos?action=initializeUpload", headers=headers(token), what="LinkedIn video init",
                          json={"initializeUploadRequest": {"owner": owner, "fileSizeBytes": size,
                                                            "uploadCaptions": False,
                                                            "uploadThumbnail": False}})).json()["value"]
@@ -84,22 +116,28 @@ def upload_video(path, owner: str, token: str) -> str:
         for part in v["uploadInstructions"]:
             f.seek(part["firstByte"])
             chunk = f.read(part["lastByte"] - part["firstByte"] + 1)
-            r = ok(requests.put(part["uploadUrl"], data=chunk, timeout=600,
-                                headers={"Content-Type": "application/octet-stream"}))
+            r = ok(http("PUT", part["uploadUrl"], data=chunk, timeout=600, what="LinkedIn video upload",
+                        headers={"Content-Type": "application/octet-stream"}))
             etags.append(r.headers.get("etag") or r.headers.get("ETag"))
-    ok(requests.post(f"{API}/videos?action=finalizeUpload", headers=headers(token), timeout=60,
+    ok(http("POST", f"{API}/videos?action=finalizeUpload", headers=headers(token), what="LinkedIn video finalize",
                      json={"finalizeUploadRequest": {"video": v["video"], "uploadToken": v.get("uploadToken") or "",
                                                      "uploadedPartIds": etags}}))
     deadline = time.time() + 600
-    while time.time() < deadline:  # wait until LinkedIn finishes processing
-        r = requests.get(f"{API}/videos/{quote(v['video'], safe='')}", headers=headers(token, False), timeout=60)
-        if r.status_code == 200 and r.json().get("status") == "AVAILABLE":
+    while True:  # wait until LinkedIn finishes processing
+        r = http("GET", f"{API}/videos/{quote(v['video'], safe='')}", headers=headers(token, False),
+                 what="LinkedIn video status")
+        status = r.json().get("status") if r.status_code == 200 else None
+        if status == "AVAILABLE":
             break
-        if r.status_code == 200 and r.json().get("status") == "PROCESSING_FAILED":
-            raise PublishError("LinkedIn could not process the video.")
+        if status == "PROCESSING_FAILED":
+            raise PublishError("LinkedIn could not process the video (PROCESSING_FAILED). Try re-rendering it "
+                               "as H.264 MP4, or a shorter/smaller file.")
         if r.status_code != 200:  # status not readable with this login: give it time, the post step retries
             time.sleep(30)
             break
+        if time.time() > deadline:
+            raise PublishError("LinkedIn is still processing the video after 10 minutes (status "
+                               f"{status}). Nothing was posted - run the same publish command again later.")
         time.sleep(10)
     return v["video"]
 
@@ -108,7 +146,7 @@ def publish(target, media, account, ctx) -> dict:
     if account.get("expires_at") and time.time() > account["expires_at"]:
         raise PublishError("LinkedIn login expired (they last 60 days). Run ./sa connect linkedin again.")
     token, author = account["access_token"], account["person_urn"]
-    body = {"author": author, "commentary": escape(target.get("caption", "")), "visibility": "PUBLIC",
+    body = {"author": author, "commentary": escape(expand_mentions(target.get("caption", ""), ctx.get("brand"))), "visibility": "PUBLIC",
             "distribution": {"feedDistribution": "MAIN_FEED", "targetEntities": [],
                              "thirdPartyDistributionChannels": []},
             "lifecycleState": "PUBLISHED", "isReshareDisabledByAuthor": False}
@@ -119,10 +157,20 @@ def publish(target, media, account, ctx) -> dict:
         body["content"] = {"media": {"id": upload_video(media, author, token),
                                      "title": target.get("title") or ctx.get("title", "")}}
     for attempt in range(6):
-        r = requests.post(f"{API}/posts", headers=headers(token), json=body, timeout=60)
+        r = http("POST", f"{API}/posts", headers=headers(token), json=body, final=True, what="LinkedIn create post")
         if r.status_code < 400 or ctx["kind"] != "video" or attempt == 5:
             break
         time.sleep(15)  # video may still be processing
     ok(r)
     post_id = r.headers.get("x-restli-id") or r.headers.get("X-RestLi-Id") or ""
     return {"id": post_id, "url": f"https://www.linkedin.com/feed/update/{post_id}/" if post_id else None}
+
+
+def edit(target, account, post_id: str, caption: str, brand: str | None = None) -> None:
+    """Replace the text of a live post (Posts API PARTIAL_UPDATE). Media can't be changed."""
+    if account.get("expires_at") and time.time() > account["expires_at"]:
+        raise PublishError("LinkedIn login expired (they last 60 days). Run ./sa connect linkedin again.")
+    r = http("POST", f"{API}/posts/{quote(post_id, safe='')}", what="LinkedIn edit post", final=True,
+             headers={**headers(account["access_token"]), "X-RestLi-Method": "PARTIAL_UPDATE"},
+             json={"patch": {"$set": {"commentary": escape(expand_mentions(caption, brand))}}})
+    ok(r)

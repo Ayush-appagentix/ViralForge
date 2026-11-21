@@ -56,9 +56,14 @@ def render(html: Path, width: int, height: int) -> tuple[Path, Path]:
            "--no-default-browser-check", "--force-device-scale-factor=1",
            f"--user-data-dir={to(profile)}", f"--window-size={width},{height}",
            "--virtual-time-budget=6000", f"--screenshot={to(png)}", url]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    if tmp:
-        tmp.cleanup()
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        sys.exit("The browser took over 2 minutes and was stopped. Usually the HTML waits on something that "
+                 "never loads (a web font or image URL) or an endless animation - remove it and try again.")
+    finally:
+        if tmp:
+            tmp.cleanup()
     if not png.exists():
         sys.exit(f"Browser did not produce a screenshot.\n{r.stderr[-2000:]}")
     img = Image.open(png).convert("RGB")
@@ -76,6 +81,11 @@ if __name__ == "__main__":
     ap.add_argument("html")
     ap.add_argument("--size", default="1080x1350", help="WIDTHxHEIGHT, e.g. 1080x1350 or 1080x1920")
     a = ap.parse_args()
-    w, h = (int(x) for x in a.size.lower().split("x"))
+    try:
+        w, h = (int(x) for x in a.size.lower().split("x"))
+    except ValueError:
+        sys.exit(f"--size must look like 1080x1350, not '{a.size}'.")
+    if not Path(a.html).exists():
+        sys.exit(f"HTML file not found: {a.html}")
     png, jpg = render(Path(a.html), w, h)
     print(f"Wrote {png} and {jpg} ({w}x{h}, {jpg.stat().st_size // 1024} KB)")

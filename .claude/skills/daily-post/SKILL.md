@@ -20,7 +20,8 @@ You may be running unattended. **Do not ask questions. Never run `./sa publish`.
    - slideshow (Reel/Short): 4–7 slides at 1080x1920 in `slides/`, then `./sa slideshow <draft>`
      (add `--music` if the brand has a track in `brands/<brand>/music/`), media = `final.mp4`
    Read the rendered image/preview and fix overflow, cut-off or hard-to-read text before moving on.
-6. Write `draft.json`: targets from the brand's **Daily targets**, captions per platform in the brand voice,
+6. Write `draft.json`: targets from the brand's **Daily targets**, captions per platform in the brand voice
+   following **Writing captions** in CLAUDE.md (never invent personal stories; leave `[your example here]` instead),
    `alt_text`, `topic`, `source: "daily"`, `status: "pending"`.
-7. `./sa drafts check <draft>` and fix problems (if a target's account isn't connected, drop that target
+7. `./sa drafts check <draft>` and fix problems, including every Voice warning (if a target's account isn't connected, drop that target
    and note it). Finish with one line: the draft folder and title.

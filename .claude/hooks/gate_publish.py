@@ -6,7 +6,7 @@ import re
 import sys
 
 PUBLISH = re.compile(
-    r"\bsa\s+publish\b|scripts/publish\.py|graph\.facebook\.com|rupload\.facebook\.com"
+    r"\bsa\s+(?:publish|edit-post)\b|scripts/(?:publish|edit_post)\.py|graph\.facebook\.com|rupload\.facebook\.com"
     r"|api\.linkedin\.com|googleapis\.com/upload|youtube/v3/videos",
     re.IGNORECASE,
 )

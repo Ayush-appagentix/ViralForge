@@ -7,6 +7,7 @@ Usage:
   ./sa drafts check <draft>                         will it post cleanly? (limits, formats, accounts)
   ./sa drafts reject <draft>                        throw it away (moved to drafts/_rejected)
   ./sa drafts mark-posted <draft> <platform:account> [post-url]   after you clicked Post yourself
+  ./sa drafts reset <draft> <platform:account>      you checked: it did NOT post (needs_check -> failed)
   ./sa drafts history [--days 30]                   what was posted recently
 """
 from __future__ import annotations
@@ -20,8 +21,9 @@ from datetime import datetime, timedelta
 from common import (DRAFTS, HISTORY, ROOT, load_draft, now_iso, resolve_draft, save_draft, slug,
                     target_key)
 from publish import check_draft, finalize
+from voice import draft_warnings
 
-WAITING = ("pending", "scheduled", "awaiting_manual", "partial", "failed")
+WAITING = ("pending", "scheduled", "awaiting_manual", "needs_check", "partial", "failed")
 
 
 def cmd_list(_):
@@ -68,7 +70,11 @@ def cmd_show(a):
 
 def cmd_check(a):
     d = resolve_draft(a.draft)
-    problems = check_draft(d, load_draft(d))
+    dr = load_draft(d)
+    problems = check_draft(d, dr)
+    voice = draft_warnings(dr)
+    if voice:
+        print("Voice - sounds AI-written, rewrite before showing the user:\n" + "\n".join(f"  - {w}" for w in voice))
     if problems:
         print("Problems:\n" + "\n".join(f"  - {p}" for p in problems))
         sys.exit(1)
@@ -95,6 +101,18 @@ def cmd_mark_posted(a):
     dr.setdefault("results", {})[a.target] = {"status": "posted", "url": a.url, "at": now_iso(), "manual": True}
     final = finalize(d, dr)
     print(f"Marked {a.target} as posted. Draft status: {load_draft(final)['status']}")
+
+
+def cmd_reset(a):
+    d = resolve_draft(a.draft)
+    dr = load_draft(d)
+    res = dr.get("results", {}).get(a.target)
+    if not res or res.get("status") != "needs_check":
+        sys.exit(f"{a.target} is not waiting for a check (status: {(res or {}).get('status', 'not posted')}).")
+    res.update({"status": "failed", "checked_at": now_iso(),
+                "error": "checked by user: not posted - safe to publish again"})
+    final = finalize(d, dr)
+    print(f"{a.target} reset. Draft status: {load_draft(final)['status']}. Publishing again will retry it.")
 
 
 def cmd_history(a):
@@ -127,6 +145,10 @@ if __name__ == "__main__":
     p.add_argument("target")
     p.add_argument("url", nargs="?")
     p.set_defaults(fn=cmd_mark_posted)
+    p = sub.add_parser("reset")
+    p.add_argument("draft")
+    p.add_argument("target")
+    p.set_defaults(fn=cmd_reset)
     p = sub.add_parser("history")
     p.add_argument("--days", type=int, default=30)
     p.set_defaults(fn=cmd_history)

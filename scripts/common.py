@@ -25,6 +25,71 @@ class PublishError(Exception):
     """A platform rejected a request; the message is safe to show the user."""
 
 
+class OutcomeUnknown(PublishError):
+    """The request that creates the post was sent, but no clear answer came back, so the post
+    may be live. Never retried automatically: retrying could post twice."""
+
+
+# ---------- HTTP with retries ----------
+
+RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+def _rewind(kw: dict) -> list:
+    """Remember where file bodies start so a retry re-sends them from the same place."""
+    spots = []
+    bodies = [kw.get("data")] + [v[1] if isinstance(v, tuple) else v for v in (kw.get("files") or {}).values()]
+    for b in bodies:
+        if hasattr(b, "seek") and hasattr(b, "tell"):
+            spots.append((b, b.tell()))
+    return spots
+
+
+def http(method: str, url: str, *, final: bool = False, attempts: int = 4, what: str = "request",
+         **kw) -> "requests.Response":
+    """requests.request with retries for flaky networks, rate limits (429) and server errors (5xx).
+
+    final=True marks the call that makes the post public. It is never retried after the server may
+    have received it: a lost answer raises OutcomeUnknown instead, so nothing gets posted twice.
+    """
+    import time
+
+    import requests
+
+    kw.setdefault("timeout", 60)
+    spots = _rewind(kw)
+    for attempt in range(1, attempts + 1):
+        r, err = None, None
+        try:
+            r = requests.request(method, url, **kw)
+        except requests.exceptions.ConnectTimeout as e:  # never reached the server: safe to retry
+            err = e
+        except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
+            if final:
+                raise OutcomeUnknown(f"No answer from the platform during {what} ({type(e).__name__}). "
+                                     "The post may or may not be live - check before retrying.")
+            err = e
+        else:
+            if r.status_code not in RETRY_STATUS:
+                return r
+            if final and r.status_code != 429:  # 429 = refused before doing anything
+                raise OutcomeUnknown(f"The platform answered {r.status_code} during {what}. "
+                                     "The post may or may not be live - check before retrying.")
+        if attempt == attempts:
+            if r is not None:
+                return r
+            raise PublishError(f"Network problem during {what} after {attempts} tries: {err}")
+        wait = min(2 ** attempt * 2, 60)
+        if r is not None and (r.headers.get("Retry-After") or "").isdigit():
+            wait = min(int(r.headers["Retry-After"]), 300)
+        print(f"  {what}: {'HTTP ' + str(r.status_code) if r is not None else type(err).__name__}, "
+              f"retrying in {wait}s ({attempt}/{attempts - 1})", flush=True)
+        time.sleep(wait)
+        for body, pos in spots:
+            body.seek(pos)
+    raise AssertionError("unreachable")
+
+
 # ---------- settings (.env) ----------
 
 def env(name: str, default: str | None = None) -> str | None:
@@ -200,7 +265,10 @@ def resolve_draft(arg: str) -> Path:
     for c in ([p] if p.is_absolute() else [ROOT / p, DRAFTS / arg, POSTED / arg]):
         if (c / "draft.json").exists():
             return c.resolve()
-    sys.exit(f"No draft.json found for '{arg}'")
+    recent = sorted((f.parent.name for f in DRAFTS.glob("*/draft.json") if not f.parent.name.startswith("_")),
+                    reverse=True)[:5]
+    hint = ("\nRecent drafts: " + ", ".join(recent)) if recent else ""
+    sys.exit(f"No draft.json found for '{arg}' (looked in drafts/ and posted/).{hint}")
 
 
 def load_draft(d: Path) -> dict:
@@ -232,6 +300,23 @@ def media_kind(path: Path | None) -> str:
     raise ValueError(f"Unsupported media type: {path.name}")
 
 
+def fingerprint(d: Path, draft: dict) -> str:
+    """Hash of everything the audience will see: media bytes, alt text and every target's text.
+    Stored at approval; a scheduled run refuses to post if it no longer matches."""
+    import hashlib
+
+    h = hashlib.sha256()
+    media = draft_media(d, draft)
+    if media and media.exists():
+        with media.open("rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+    seen = {k: draft.get(k) for k in ("media", "alt_text")}
+    seen["targets"] = [{k: v for k, v in t.items()} for t in draft.get("targets") or []]
+    h.update(json.dumps(seen, sort_keys=True, ensure_ascii=False).encode())
+    return h.hexdigest()[:16]
+
+
 def target_key(t: dict) -> str:
     return f"{t['platform']}:{t.get('account') or 'default'}"
 
@@ -244,6 +329,42 @@ def append_history(entry: dict) -> None:
     POSTED.mkdir(exist_ok=True)
     with HISTORY.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+class DraftLock:
+    """Stops two publishes of the same draft running at once (e.g. a scheduled run and a manual one).
+    Lives outside the draft folder because the folder is moved to posted/ while locked."""
+
+    def __init__(self, draft_dir: Path):
+        self.path = ROOT / ".cache" / "locks" / f"{draft_dir.name}.lock"
+
+    def _holder_alive(self) -> bool:
+        try:
+            pid = int(self.path.read_text().split()[0])
+            os.kill(pid, 0)
+            return True
+        except (OSError, ValueError, IndexError):
+            return False
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for _ in range(2):
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                if self._holder_alive():
+                    raise SystemExit("This draft is already being published by another run "
+                                     f"(lock: {self.path.relative_to(ROOT)}). Wait for it to finish.")
+                self.path.unlink(missing_ok=True)  # left behind by a crashed run
+                continue
+            with os.fdopen(fd, "w") as f:
+                f.write(f"{os.getpid()} {now_iso()}\n")
+            return self
+        raise SystemExit(f"Could not lock {self.path}")
+
+    def __exit__(self, *exc):
+        self.path.unlink(missing_ok=True)
+        return False
 
 
 def print_json(data) -> None:

@@ -7,7 +7,8 @@ Usage:
   ./sa publish <draft_dir> --cancel                     cancel a scheduled post
 
 Claude Code always asks you before this command runs. Already-posted targets are skipped,
-so running it again after a failure only retries what failed.
+so running it again after a failure only retries what failed. A target in "needs_check" (the
+platform may have posted but gave no clear answer) is never retried until you check it.
 """
 from __future__ import annotations
 
@@ -16,14 +17,16 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 
 import requests
 
 import platforms
-from common import (DRAFTS, POSTED, ROOT, PublishError, append_history, draft_media, get_account,
-                    is_wsl, load_draft, media_kind, now_iso, probe, resolve_draft, save_draft, target_key)
+from common import (DRAFTS, POSTED, ROOT, DraftLock, OutcomeUnknown, PublishError, append_history, draft_media, fingerprint, get_account,
+                    is_wsl, load_draft, platform_group, media_kind, now_iso, probe, resolve_draft, save_draft, target_key)
 
 TASK_PATH = "\\SocialAgent\\"
 
@@ -47,6 +50,14 @@ def media_info(media: Path | None) -> dict:
     return info
 
 
+WARN_DAYS = 7
+
+
+def login_days_left(account: dict) -> int | None:
+    exp = account.get("expires_at")
+    return None if not exp else int((exp - time.time()) // 86400)
+
+
 def selected(t: dict, only: set[str] | None) -> bool:
     return not only or target_key(t) in only or t["platform"] in only
 
@@ -65,11 +76,21 @@ def check_draft(d: Path, draft: dict, only: set[str] | None = None) -> list[str]
             problems.append(f"{key}: {mod.LABEL} can't post {info['kind']} posts.")
             continue
         problems += [f"{key}: {p}" for p in mod.check(t, media, info)]
+        if hasattr(mod, "warnings"):
+            for w in mod.warnings(t, draft):
+                print(f"Warning - {key}: {w}")
         if mod.MODE == "api":
             try:
-                get_account(getattr(mod, "ACCOUNTS_FROM", t["platform"]), t.get("account"))
+                _, account = get_account(getattr(mod, "ACCOUNTS_FROM", t["platform"]), t.get("account"))
             except PublishError as e:
                 problems.append(f"{key}: {e}")
+                continue
+            days = login_days_left(account)
+            if days is not None and days < 0:
+                problems.append(f"{key}: login expired - in your terminal run ./sa connect {platform_group(t['platform'])}")
+            elif days is not None and days <= WARN_DAYS:
+                print(f"Warning - {key}: login expires in {days} day(s). Reconnect soon so posts don't fail: "
+                      f"./sa connect {platform_group(t['platform'])}")
     return problems
 
 
@@ -77,7 +98,9 @@ def check_draft(d: Path, draft: dict, only: set[str] | None = None) -> list[str]
 
 def finalize(d: Path, draft: dict) -> Path:
     states = [draft.get("results", {}).get(target_key(t), {}).get("status") for t in draft["targets"]]
-    if all(s == "posted" for s in states):
+    if "needs_check" in states:
+        draft["status"] = "needs_check"
+    elif all(s == "posted" for s in states):
         draft["status"] = "posted"
     elif all(s in ("posted", "awaiting_manual") for s in states):
         draft["status"] = "awaiting_manual"
@@ -101,15 +124,21 @@ def run_targets(d: Path, draft: dict, only: set[str] | None) -> Path:
     media = draft_media(d, draft)
     info = media_info(media)
     ctx = {"kind": info["kind"], "draft_dir": d, "alt_text": draft.get("alt_text"), "title": draft.get("title"),
-           "thumbnail_at": draft.get("thumbnail_at"), "duration": info.get("duration"),
+           "thumbnail_at": draft.get("thumbnail_at"), "brand": draft.get("brand"), "duration": info.get("duration"),
            "orientation": info.get("orientation")}
     draft.setdefault("results", {})
     for t in sorted(draft["targets"], key=lambda t: platforms.sort_key(t["platform"])):
         key = target_key(t)
         if not selected(t, only):
             continue
-        if draft["results"].get(key, {}).get("status") in ("posted", "awaiting_manual"):
+        state = draft["results"].get(key, {}).get("status")
+        if state in ("posted", "awaiting_manual"):
             print(f"- {key}: already done, skipping")
+            continue
+        if state == "needs_check":
+            print(f"- {key}: SKIPPED - the last try may have posted. Check the platform, then run\n"
+                  f"    ./sa drafts mark-posted {d.name} {key} [url]   if it is live, or\n"
+                  f"    ./sa drafts reset {d.name} {key}               if it is not, then publish again.")
             continue
         mod = platforms.load(t["platform"])
         print(f"- {key}: posting to {mod.LABEL} ...", flush=True)
@@ -128,11 +157,20 @@ def run_targets(d: Path, draft: dict, only: set[str] | None) -> Path:
                 for step in res.get("steps", []):
                     print(f"    * {step}")
             else:
-                draft["results"][key] = {"status": "posted", "id": res.get("id"), "url": res.get("url"), "at": now_iso()}
+                draft["results"][key] = {"status": "posted", "id": res.get("id"), "url": res.get("url"), "at": now_iso(),
+                                         "caption_live": t.get("caption")}
                 print(f"  posted: {res.get('url')}")
+        except OutcomeUnknown as e:
+            draft["results"][key] = {"status": "needs_check", "error": str(e), "at": now_iso()}
+            print(f"  NOT SURE IT POSTED: {e}\n  Not retrying, so it can't post twice.")
         except (PublishError, requests.RequestException, OSError) as e:
             draft["results"][key] = {"status": "failed", "error": str(e), "at": now_iso()}
             print(f"  FAILED: {e}")
+        except Exception as e:  # noqa: BLE001 - one broken platform must not stop the others
+            msg = f"unexpected {type(e).__name__}: {e}"
+            draft["results"][key] = {"status": "failed", "error": msg, "at": now_iso()}
+            print(f"  FAILED ({msg}). The other platforms still run.")
+            traceback.print_exc(file=sys.stderr)
         save_draft(d, draft)
     return finalize(d, draft)
 
@@ -170,11 +208,19 @@ def schedule(d: Path, draft: dict, when: str) -> None:
         sys.exit(f"{when} is already in the past (PC local time).")
     if r.returncode != 0:
         sys.exit(f"Could not create the Windows scheduled task:\n{r.stderr[-1500:]}")
-    draft.update({"status": "scheduled", "scheduled_for": when,
-                  "approval": draft.get("approval") or {"approved_at": now_iso(), "how": "confirmed in Claude Code"}})
+    draft.update({"status": "scheduled", "scheduled_for": when, "approval": approval(d, draft)})
     save_draft(d, draft)
     print(f"Scheduled for {when} (PC local time). Windows Task Scheduler > SocialAgent > post-{d.name}")
     print("Your PC must be on and signed in at that time; if it's off, it posts as soon as it's back on.")
+
+
+def approval(d: Path, draft: dict) -> dict:
+    return {"approved_at": now_iso(), "how": "confirmed in Claude Code", "fingerprint": fingerprint(d, draft)}
+
+
+def changed_since_approval(d: Path, draft: dict) -> bool:
+    saved = (draft.get("approval") or {}).get("fingerprint")
+    return bool(saved) and saved != fingerprint(d, draft)
 
 
 def unschedule(d: Path) -> None:
@@ -207,7 +253,19 @@ def main() -> None:
         log = (DRAFTS / "_scheduled.log").open("a", encoding="utf-8")
         sys.stdout = sys.stderr = log
         print(f"\n=== {now_iso()} scheduled publish of {d.name}")
-    draft = load_draft(d)
+    try:
+        with DraftLock(d):
+            run(d, a)
+    except Exception:  # noqa: BLE001 - nobody is watching a scheduled run: always tell the user
+        if not a.scheduled_run:
+            raise
+        traceback.print_exc()
+        notify(f"Scheduled post '{d.name}' crashed - see drafts/_scheduled.log, then run /review")
+        sys.exit(1)
+
+
+def run(d: Path, a: argparse.Namespace) -> None:
+    draft = load_draft(d)  # read inside the lock: another run may just have changed it
 
     if draft.get("status") in ("posted", "rejected"):
         sys.exit(f"This draft is already {draft['status']}.")
@@ -222,7 +280,21 @@ def main() -> None:
         unschedule(d)
         return
 
-    only = {s.strip() for s in a.only.split(",")} if a.only else None
+    if a.scheduled_run and changed_since_approval(d, draft):
+        unschedule(d)
+        draft.update({"status": "pending", "scheduled_for": None})
+        save_draft(d, draft)
+        print("Not posting: the draft was changed after you approved the schedule. Back to pending.")
+        notify(f"'{draft.get('title', d.name)}' changed after approval - not posted. Run /review to approve it again.")
+        return
+
+    only = {s.strip() for s in a.only.split(",") if s.strip()} if a.only else None
+    if only:
+        known = {target_key(t) for t in draft.get("targets") or []} | {t["platform"] for t in draft.get("targets") or []}
+        unknown = sorted(only - known)
+        if unknown:
+            sys.exit(f"--only {', '.join(unknown)} is not in this draft. Its targets: "
+                     f"{', '.join(sorted(target_key(t) for t in draft.get('targets') or []))}")
     problems = check_draft(d, draft, only)
     if problems:
         print("Not posting - fix these first:\n" + "\n".join(f"  - {p}" for p in problems))
@@ -234,7 +306,8 @@ def main() -> None:
         schedule(d, draft, a.at)
         return
 
-    draft["approval"] = draft.get("approval") or {"approved_at": now_iso(), "how": "confirmed in Claude Code"}
+    if not a.scheduled_run:  # a manual publish is a fresh approval of what is there now
+        draft["approval"] = approval(d, draft)
     final_dir = run_targets(d, draft, only)
     result = load_draft(final_dir)
     print(f"\nStatus: {result['status']}   ({final_dir})")
