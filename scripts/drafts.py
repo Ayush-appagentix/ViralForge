@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from common import (DRAFTS, HISTORY, ROOT, load_draft, now_iso, resolve_draft, save_draft, slug,
                     target_key)
 from publish import check_draft, finalize
+from voice import draft_warnings
 
 WAITING = ("pending", "scheduled", "awaiting_manual", "needs_check", "partial", "failed")
 
@@ -69,7 +70,11 @@ def cmd_show(a):
 
 def cmd_check(a):
     d = resolve_draft(a.draft)
-    problems = check_draft(d, load_draft(d))
+    dr = load_draft(d)
+    problems = check_draft(d, dr)
+    voice = draft_warnings(dr)
+    if voice:
+        print("Voice - sounds AI-written, rewrite before showing the user:\n" + "\n".join(f"  - {w}" for w in voice))
     if problems:
         print("Problems:\n" + "\n".join(f"  - {p}" for p in problems))
         sys.exit(1)

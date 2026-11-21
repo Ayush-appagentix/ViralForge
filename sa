@@ -9,6 +9,7 @@
 #   ./sa render-image <file.html> [--size]  design (HTML) -> post.png + post.jpg
 #   ./sa slideshow <draft_dir>              slides/*.html -> short video (Reels/Shorts)
 #   ./sa drafts <list|new|show|check|reject|mark-posted|history> ...
+#   ./sa voice <draft>                      flag captions that sound AI-written
 #   ./sa accounts                           connected accounts (no secrets shown)
 #
 # Posting (always asks you first):
@@ -25,7 +26,7 @@ export PATH="$HOME/.local/bin:$PATH"
 cmd="${1:-help}"
 [ $# -gt 0 ] && shift
 case "$cmd" in
-  help|-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  help|-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 script="$ROOT/scripts/${cmd//-/_}.py"
 if [ ! -f "$script" ]; then
