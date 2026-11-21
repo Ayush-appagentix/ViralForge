@@ -92,16 +92,21 @@ def upload_video(path, owner: str, token: str) -> str:
                      json={"finalizeUploadRequest": {"video": v["video"], "uploadToken": v.get("uploadToken") or "",
                                                      "uploadedPartIds": etags}}))
     deadline = time.time() + 600
-    while time.time() < deadline:  # wait until LinkedIn finishes processing
+    while True:  # wait until LinkedIn finishes processing
         r = http("GET", f"{API}/videos/{quote(v['video'], safe='')}", headers=headers(token, False),
                  what="LinkedIn video status")
-        if r.status_code == 200 and r.json().get("status") == "AVAILABLE":
+        status = r.json().get("status") if r.status_code == 200 else None
+        if status == "AVAILABLE":
             break
-        if r.status_code == 200 and r.json().get("status") == "PROCESSING_FAILED":
-            raise PublishError("LinkedIn could not process the video.")
+        if status == "PROCESSING_FAILED":
+            raise PublishError("LinkedIn could not process the video (PROCESSING_FAILED). Try re-rendering it "
+                               "as H.264 MP4, or a shorter/smaller file.")
         if r.status_code != 200:  # status not readable with this login: give it time, the post step retries
             time.sleep(30)
             break
+        if time.time() > deadline:
+            raise PublishError("LinkedIn is still processing the video after 10 minutes (status "
+                               f"{status}). Nothing was posted - run the same publish command again later.")
         time.sleep(10)
     return v["video"]
 

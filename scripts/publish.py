@@ -249,8 +249,15 @@ def main() -> None:
         log = (DRAFTS / "_scheduled.log").open("a", encoding="utf-8")
         sys.stdout = sys.stderr = log
         print(f"\n=== {now_iso()} scheduled publish of {d.name}")
-    with DraftLock(d):
-        run(d, a)
+    try:
+        with DraftLock(d):
+            run(d, a)
+    except Exception:  # noqa: BLE001 - nobody is watching a scheduled run: always tell the user
+        if not a.scheduled_run:
+            raise
+        traceback.print_exc()
+        notify(f"Scheduled post '{d.name}' crashed - see drafts/_scheduled.log, then run /review")
+        sys.exit(1)
 
 
 def run(d: Path, a: argparse.Namespace) -> None:
@@ -277,7 +284,13 @@ def run(d: Path, a: argparse.Namespace) -> None:
         notify(f"'{draft.get('title', d.name)}' changed after approval - not posted. Run /review to approve it again.")
         return
 
-    only = {s.strip() for s in a.only.split(",")} if a.only else None
+    only = {s.strip() for s in a.only.split(",") if s.strip()} if a.only else None
+    if only:
+        known = {target_key(t) for t in draft.get("targets") or []} | {t["platform"] for t in draft.get("targets") or []}
+        unknown = sorted(only - known)
+        if unknown:
+            sys.exit(f"--only {', '.join(unknown)} is not in this draft. Its targets: "
+                     f"{', '.join(sorted(target_key(t) for t in draft.get('targets') or []))}")
     problems = check_draft(d, draft, only)
     if problems:
         print("Not posting - fix these first:\n" + "\n".join(f"  - {p}" for p in problems))

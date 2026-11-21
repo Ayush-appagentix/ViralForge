@@ -265,7 +265,10 @@ def resolve_draft(arg: str) -> Path:
     for c in ([p] if p.is_absolute() else [ROOT / p, DRAFTS / arg, POSTED / arg]):
         if (c / "draft.json").exists():
             return c.resolve()
-    sys.exit(f"No draft.json found for '{arg}'")
+    recent = sorted((f.parent.name for f in DRAFTS.glob("*/draft.json") if not f.parent.name.startswith("_")),
+                    reverse=True)[:5]
+    hint = ("\nRecent drafts: " + ", ".join(recent)) if recent else ""
+    sys.exit(f"No draft.json found for '{arg}' (looked in drafts/ and posted/).{hint}")
 
 
 def load_draft(d: Path) -> dict:
