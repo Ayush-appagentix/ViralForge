@@ -24,7 +24,7 @@ from pathlib import Path
 import requests
 
 import platforms
-from common import (DRAFTS, POSTED, ROOT, DraftLock, OutcomeUnknown, PublishError, append_history, draft_media, get_account,
+from common import (DRAFTS, POSTED, ROOT, DraftLock, OutcomeUnknown, PublishError, append_history, draft_media, fingerprint, get_account,
                     is_wsl, load_draft, media_kind, now_iso, probe, resolve_draft, save_draft, target_key)
 
 TASK_PATH = "\\SocialAgent\\"
@@ -188,11 +188,19 @@ def schedule(d: Path, draft: dict, when: str) -> None:
         sys.exit(f"{when} is already in the past (PC local time).")
     if r.returncode != 0:
         sys.exit(f"Could not create the Windows scheduled task:\n{r.stderr[-1500:]}")
-    draft.update({"status": "scheduled", "scheduled_for": when,
-                  "approval": draft.get("approval") or {"approved_at": now_iso(), "how": "confirmed in Claude Code"}})
+    draft.update({"status": "scheduled", "scheduled_for": when, "approval": approval(d, draft)})
     save_draft(d, draft)
     print(f"Scheduled for {when} (PC local time). Windows Task Scheduler > SocialAgent > post-{d.name}")
     print("Your PC must be on and signed in at that time; if it's off, it posts as soon as it's back on.")
+
+
+def approval(d: Path, draft: dict) -> dict:
+    return {"approved_at": now_iso(), "how": "confirmed in Claude Code", "fingerprint": fingerprint(d, draft)}
+
+
+def changed_since_approval(d: Path, draft: dict) -> bool:
+    saved = (draft.get("approval") or {}).get("fingerprint")
+    return bool(saved) and saved != fingerprint(d, draft)
 
 
 def unschedule(d: Path) -> None:
@@ -245,6 +253,14 @@ def run(d: Path, a: argparse.Namespace) -> None:
         unschedule(d)
         return
 
+    if a.scheduled_run and changed_since_approval(d, draft):
+        unschedule(d)
+        draft.update({"status": "pending", "scheduled_for": None})
+        save_draft(d, draft)
+        print("Not posting: the draft was changed after you approved the schedule. Back to pending.")
+        notify(f"'{draft.get('title', d.name)}' changed after approval - not posted. Run /review to approve it again.")
+        return
+
     only = {s.strip() for s in a.only.split(",")} if a.only else None
     problems = check_draft(d, draft, only)
     if problems:
@@ -257,7 +273,8 @@ def run(d: Path, a: argparse.Namespace) -> None:
         schedule(d, draft, a.at)
         return
 
-    draft["approval"] = draft.get("approval") or {"approved_at": now_iso(), "how": "confirmed in Claude Code"}
+    if not a.scheduled_run:  # a manual publish is a fresh approval of what is there now
+        draft["approval"] = approval(d, draft)
     final_dir = run_targets(d, draft, only)
     result = load_draft(final_dir)
     print(f"\nStatus: {result['status']}   ({final_dir})")

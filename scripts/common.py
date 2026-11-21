@@ -297,6 +297,23 @@ def media_kind(path: Path | None) -> str:
     raise ValueError(f"Unsupported media type: {path.name}")
 
 
+def fingerprint(d: Path, draft: dict) -> str:
+    """Hash of everything the audience will see: media bytes, alt text and every target's text.
+    Stored at approval; a scheduled run refuses to post if it no longer matches."""
+    import hashlib
+
+    h = hashlib.sha256()
+    media = draft_media(d, draft)
+    if media and media.exists():
+        with media.open("rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                h.update(block)
+    seen = {k: draft.get(k) for k in ("media", "alt_text")}
+    seen["targets"] = [{k: v for k, v in t.items()} for t in draft.get("targets") or []]
+    h.update(json.dumps(seen, sort_keys=True, ensure_ascii=False).encode())
+    return h.hexdigest()[:16]
+
+
 def target_key(t: dict) -> str:
     return f"{t['platform']}:{t.get('account') or 'default'}"
 
