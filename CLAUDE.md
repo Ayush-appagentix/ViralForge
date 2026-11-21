@@ -27,7 +27,7 @@ There is no app here: you are the agent. The `./sa` toolbox gives you hands (edi
 | `./sa render-video <draft_dir>` | `edit_plan.json` → `final.mp4`, `thumbnail.jpg`, `preview.jpg` (format: top of `scripts/render_video.py`) |
 | `./sa render-image <file.html> --size WxH` | HTML design → `.png` + `.jpg` |
 | `./sa slideshow <draft_dir> [--music file]` | `slides/*.html` → `final.mp4` (Reel/Short without footage) |
-| `./sa drafts check\|show\|list\|reject\|mark-posted\|history` | manage drafts (never posts) |
+| `./sa drafts check\|show\|list\|reject\|mark-posted\|reset\|history` | manage drafts (never posts) |
 | `./sa publish <draft> [--at "YYYY-MM-DD HH:MM"] [--only k,k] [--cancel]` | **posts** (needs approval) |
 
 Subagents: **video-editor** (raw footage → finished edit) and **designer** (graphics, slides, photo edits).
@@ -52,7 +52,8 @@ Commands for the user: `/social` (anything), `/edit-video`, `/daily-post`, `/rev
 - `media` is relative to the draft folder (or null for text). Instagram needs the **.jpg**, not .png.
 - `account` is an alias from `./sa accounts`; omit to use that platform's default.
 - Status flow: `drafting` → `pending` (waiting for approval) → `scheduled` / `posted` / `partial` / `failed`
-  / `awaiting_manual`. Posted drafts move to `posted/`; history is in `posted/log.jsonl`.
+  / `awaiting_manual` / `needs_check` (platform may have posted without confirming — never retry it
+  blindly: user checks, then `drafts mark-posted` or `drafts reset`). Posted drafts move to `posted/`; history is in `posted/log.jsonl`.
 
 ## Platforms (one plug-in file each in `scripts/platforms/`)
 | platform | posts | notes |

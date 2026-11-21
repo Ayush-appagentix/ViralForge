@@ -56,6 +56,7 @@ Mention that Claude Code will show one more permission prompt — that's the fin
 
 ## 6. After publishing
 Report each target with its link or the error in plain words. Failed → explain the fix; ask before running
-publish again (it only retries what failed). Assisted targets (youtube_community, facebook_profile) →
+publish again (it only retries what failed). **NOT SURE IT POSTED / needs_check** → never retry; ask the
+user to check the platform, then `./sa drafts mark-posted ...` (live) or `./sa drafts reset ...` (not live). Assisted targets (youtube_community, facebook_profile) →
 walk the user through the printed steps; when they say it's posted, run
 `./sa drafts mark-posted <draft> <platform:account> [post-url]`.

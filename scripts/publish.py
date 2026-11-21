@@ -7,7 +7,8 @@ Usage:
   ./sa publish <draft_dir> --cancel                     cancel a scheduled post
 
 Claude Code always asks you before this command runs. Already-posted targets are skipped,
-so running it again after a failure only retries what failed.
+so running it again after a failure only retries what failed. A target in "needs_check" (the
+platform may have posted but gave no clear answer) is never retried until you check it.
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from pathlib import Path
 import requests
 
 import platforms
-from common import (DRAFTS, POSTED, ROOT, PublishError, append_history, draft_media, get_account,
+from common import (DRAFTS, POSTED, ROOT, OutcomeUnknown, PublishError, append_history, draft_media, get_account,
                     is_wsl, load_draft, media_kind, now_iso, probe, resolve_draft, save_draft, target_key)
 
 TASK_PATH = "\\SocialAgent\\"
@@ -78,7 +79,9 @@ def check_draft(d: Path, draft: dict, only: set[str] | None = None) -> list[str]
 
 def finalize(d: Path, draft: dict) -> Path:
     states = [draft.get("results", {}).get(target_key(t), {}).get("status") for t in draft["targets"]]
-    if all(s == "posted" for s in states):
+    if "needs_check" in states:
+        draft["status"] = "needs_check"
+    elif all(s == "posted" for s in states):
         draft["status"] = "posted"
     elif all(s in ("posted", "awaiting_manual") for s in states):
         draft["status"] = "awaiting_manual"
@@ -109,8 +112,14 @@ def run_targets(d: Path, draft: dict, only: set[str] | None) -> Path:
         key = target_key(t)
         if not selected(t, only):
             continue
-        if draft["results"].get(key, {}).get("status") in ("posted", "awaiting_manual"):
+        state = draft["results"].get(key, {}).get("status")
+        if state in ("posted", "awaiting_manual"):
             print(f"- {key}: already done, skipping")
+            continue
+        if state == "needs_check":
+            print(f"- {key}: SKIPPED - the last try may have posted. Check the platform, then run\n"
+                  f"    ./sa drafts mark-posted {d.name} {key} [url]   if it is live, or\n"
+                  f"    ./sa drafts reset {d.name} {key}               if it is not, then publish again.")
             continue
         mod = platforms.load(t["platform"])
         print(f"- {key}: posting to {mod.LABEL} ...", flush=True)
@@ -131,6 +140,9 @@ def run_targets(d: Path, draft: dict, only: set[str] | None) -> Path:
             else:
                 draft["results"][key] = {"status": "posted", "id": res.get("id"), "url": res.get("url"), "at": now_iso()}
                 print(f"  posted: {res.get('url')}")
+        except OutcomeUnknown as e:
+            draft["results"][key] = {"status": "needs_check", "error": str(e), "at": now_iso()}
+            print(f"  NOT SURE IT POSTED: {e}\n  Not retrying, so it can't post twice.")
         except (PublishError, requests.RequestException, OSError) as e:
             draft["results"][key] = {"status": "failed", "error": str(e), "at": now_iso()}
             print(f"  FAILED: {e}")
