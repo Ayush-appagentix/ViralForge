@@ -14,6 +14,7 @@
 #
 # Posting (always asks you first):
 #   ./sa publish <draft_dir> [--at "YYYY-MM-DD HH:MM"] [--only platform:account,...] [--cancel]
+#   ./sa edit-post <draft_dir> <platform:account>   change a live post's caption (LinkedIn)
 #
 # One-time setup (run these yourself in the terminal, not through Claude):
 #   ./sa connect <meta|youtube|linkedin> [--alias NAME]
@@ -26,7 +27,7 @@ export PATH="$HOME/.local/bin:$PATH"
 cmd="${1:-help}"
 [ $# -gt 0 ] && shift
 case "$cmd" in
-  help|-h|--help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  help|-h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 script="$ROOT/scripts/${cmd//-/_}.py"
 if [ ! -f "$script" ]; then

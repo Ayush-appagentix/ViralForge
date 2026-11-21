@@ -154,7 +154,8 @@ def run_targets(d: Path, draft: dict, only: set[str] | None) -> Path:
                 for step in res.get("steps", []):
                     print(f"    * {step}")
             else:
-                draft["results"][key] = {"status": "posted", "id": res.get("id"), "url": res.get("url"), "at": now_iso()}
+                draft["results"][key] = {"status": "posted", "id": res.get("id"), "url": res.get("url"), "at": now_iso(),
+                                         "caption_live": t.get("caption")}
                 print(f"  posted: {res.get('url')}")
         except OutcomeUnknown as e:
             draft["results"][key] = {"status": "needs_check", "error": str(e), "at": now_iso()}

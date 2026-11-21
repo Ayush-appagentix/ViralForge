@@ -133,3 +133,13 @@ def publish(target, media, account, ctx) -> dict:
     ok(r)
     post_id = r.headers.get("x-restli-id") or r.headers.get("X-RestLi-Id") or ""
     return {"id": post_id, "url": f"https://www.linkedin.com/feed/update/{post_id}/" if post_id else None}
+
+
+def edit(target, account, post_id: str, caption: str) -> None:
+    """Replace the text of a live post (Posts API PARTIAL_UPDATE). Media can't be changed."""
+    if account.get("expires_at") and time.time() > account["expires_at"]:
+        raise PublishError("LinkedIn login expired (they last 60 days). Run ./sa connect linkedin again.")
+    r = http("POST", f"{API}/posts/{quote(post_id, safe='')}", what="LinkedIn edit post", final=True,
+             headers={**headers(account["access_token"]), "X-RestLi-Method": "PARTIAL_UPDATE"},
+             json={"patch": {"$set": {"commentary": escape(caption)}}})
+    ok(r)
