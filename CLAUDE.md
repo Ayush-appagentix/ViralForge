@@ -28,6 +28,7 @@ There is no app here: you are the agent. The `./sa` toolbox gives you hands (edi
 | `./sa render-image <file.html> --size WxH` | HTML design → `.png` + `.jpg` |
 | `./sa slideshow <draft_dir> [--music file]` | `slides/*.html` → `final.mp4` (Reel/Short without footage) |
 | `./sa drafts check\|show\|list\|reject\|mark-posted\|reset\|history` | manage drafts (never posts) |
+| `./sa voice <draft>` | flags captions that sound AI-written |
 | `./sa publish <draft> [--at "YYYY-MM-DD HH:MM"] [--only k,k] [--cancel]` | **posts** (needs approval) |
 
 Subagents: **video-editor** (raw footage → finished edit) and **designer** (graphics, slides, photo edits).
@@ -54,6 +55,15 @@ Commands for the user: `/social` (anything), `/edit-video`, `/daily-post`, `/rev
 - Status flow: `drafting` → `pending` (waiting for approval) → `scheduled` / `posted` / `partial` / `failed`
   / `awaiting_manual` / `needs_check` (platform may have posted without confirming — never retry it
   blindly: user checks, then `drafts mark-posted` or `drafts reset`). Posted drafts move to `posted/`; history is in `posted/log.jsonl`.
+
+## Writing captions (the user must sound like themselves, not like AI)
+- Plain first person, the way they would type it. Uneven rhythm, short paragraphs, everyday words.
+- One honest point of view per post. Don't recap what the image or video already shows.
+- Avoid: arrow (→) or emoji bullet lists, slogan openers ("X hasn't changed. Who runs it has."),
+  "here's the thing", "notice the pattern", "isn't X, it's Y", "let that sink in", stacks of em dashes,
+  engagement-bait endings. Hashtags: at most 3 (Instagram up to 8).
+- Never invent experiences, clients or numbers for the user. Ask, or leave `[your example here]`.
+- `./sa voice <draft>` (also part of `drafts check`) flags these; rewrite until it passes.
 
 ## Platforms (one plug-in file each in `scripts/platforms/`)
 | platform | posts | notes |
