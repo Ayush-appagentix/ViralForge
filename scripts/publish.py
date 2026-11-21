@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -25,7 +26,7 @@ import requests
 
 import platforms
 from common import (DRAFTS, POSTED, ROOT, DraftLock, OutcomeUnknown, PublishError, append_history, draft_media, fingerprint, get_account,
-                    is_wsl, load_draft, media_kind, now_iso, probe, resolve_draft, save_draft, target_key)
+                    is_wsl, load_draft, platform_group, media_kind, now_iso, probe, resolve_draft, save_draft, target_key)
 
 TASK_PATH = "\\SocialAgent\\"
 
@@ -49,6 +50,14 @@ def media_info(media: Path | None) -> dict:
     return info
 
 
+WARN_DAYS = 7
+
+
+def login_days_left(account: dict) -> int | None:
+    exp = account.get("expires_at")
+    return None if not exp else int((exp - time.time()) // 86400)
+
+
 def selected(t: dict, only: set[str] | None) -> bool:
     return not only or target_key(t) in only or t["platform"] in only
 
@@ -69,9 +78,16 @@ def check_draft(d: Path, draft: dict, only: set[str] | None = None) -> list[str]
         problems += [f"{key}: {p}" for p in mod.check(t, media, info)]
         if mod.MODE == "api":
             try:
-                get_account(getattr(mod, "ACCOUNTS_FROM", t["platform"]), t.get("account"))
+                _, account = get_account(getattr(mod, "ACCOUNTS_FROM", t["platform"]), t.get("account"))
             except PublishError as e:
                 problems.append(f"{key}: {e}")
+                continue
+            days = login_days_left(account)
+            if days is not None and days < 0:
+                problems.append(f"{key}: login expired - in your terminal run ./sa connect {platform_group(t['platform'])}")
+            elif days is not None and days <= WARN_DAYS:
+                print(f"Warning - {key}: login expires in {days} day(s). Reconnect soon so posts don't fail: "
+                      f"./sa connect {platform_group(t['platform'])}")
     return problems
 
 
