@@ -68,7 +68,7 @@ def publish(target, media, account, ctx) -> dict:
         meta.rupload(container.get("uri") or
                      f"https://rupload.facebook.com/ig-api-upload/{meta.version()}/{container['id']}", token, media)
         wait_until_ready(container["id"], token, timeout=900)
-    published = meta.post(f"{ig}/media_publish", token, data={"creation_id": container["id"]})
+    published = meta.post(f"{ig}/media_publish", token, data={"creation_id": container["id"]}, final=True)
     try:
         link = meta.get(published["id"], token, fields="permalink").get("permalink")
     except PublishError:

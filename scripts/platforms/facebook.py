@@ -36,7 +36,7 @@ def publish(target, media, account, ctx) -> dict:
     if ctx["kind"] == "image":
         with media.open("rb") as f:
             d = meta.post(f"{page}/photos", token, data={"caption": caption},
-                          files={"source": (media.name, f, "image/jpeg")})
+                          files={"source": (media.name, f, "image/jpeg")}, final=True)
         try:
             ctx["public_image_url"] = meta.largest_image_url(d["id"], token)
         except PublishError:
@@ -49,7 +49,7 @@ def publish(target, media, account, ctx) -> dict:
         meta.rupload(start.get("upload_url") or f"https://rupload.facebook.com/video-upload/{meta.version()}/{vid}",
                      token, media, {"Content-Type": "application/octet-stream"})
         meta.post(f"{page}/video_reels", token, data={"video_id": vid, "upload_phase": "finish",
-                                                      "video_state": "PUBLISHED", "description": caption})
+                                                      "video_state": "PUBLISHED", "description": caption}, final=True)
         return {"id": vid, "url": f"https://www.facebook.com/reel/{vid}"}
-    d = meta.post(f"{page}/feed", token, data={"message": caption})
+    d = meta.post(f"{page}/feed", token, data={"message": caption}, final=True)
     return {"id": d["id"], "url": permalink(d["id"], token)}
