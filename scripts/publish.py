@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -133,6 +134,11 @@ def run_targets(d: Path, draft: dict, only: set[str] | None) -> Path:
         except (PublishError, requests.RequestException, OSError) as e:
             draft["results"][key] = {"status": "failed", "error": str(e), "at": now_iso()}
             print(f"  FAILED: {e}")
+        except Exception as e:  # noqa: BLE001 - one broken platform must not stop the others
+            msg = f"unexpected {type(e).__name__}: {e}"
+            draft["results"][key] = {"status": "failed", "error": msg, "at": now_iso()}
+            print(f"  FAILED ({msg}). The other platforms still run.")
+            traceback.print_exc(file=sys.stderr)
         save_draft(d, draft)
     return finalize(d, draft)
 
