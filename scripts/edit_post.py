@@ -47,7 +47,7 @@ def main() -> None:
 
     try:
         alias, account = get_account(getattr(mod, "ACCOUNTS_FROM", target["platform"]), target.get("account"))
-        mod.edit(target, {**account, "_alias": alias}, res["id"], caption)
+        mod.edit(target, {**account, "_alias": alias}, res["id"], caption, brand=draft.get("brand"))
     except PublishError as e:
         sys.exit(f"Edit failed: {e}")
     res.setdefault("edits", []).append({"at": now_iso()})

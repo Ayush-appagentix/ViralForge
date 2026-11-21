@@ -1,0 +1,3 @@
+{
+  "_help": "LinkedIn tags. Write @Name in a caption and it becomes a real tag. Find a company's number in the f_C= part of its LinkedIn Jobs page URL. Example: \"Replit\": \"urn:li:organization:1234567\"."
+}

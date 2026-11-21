@@ -81,4 +81,6 @@ New platform = new file in `scripts/platforms/` (contract in `scripts/platforms/
 
 ## Brands
 `brands/<name>/brand.md` holds voice, audience, colours, fonts, hashtags, default targets and the daily plan;
-`logo.png`, `fonts/`, `music/` sit beside it. Default brand: `main`. Read the brand file before writing anything.
+`logo.png`, `fonts/`, `music/` sit beside it.
+`mentions.json` maps names to LinkedIn URNs: write `@Replit` in a caption and it posts as a real tag
+(`drafts check` warns about `@Names` it doesn't know). Default brand: `main`. Read the brand file before writing anything.

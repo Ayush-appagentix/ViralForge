@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import requests
 
-from common import PublishError, env, http
+from common import BRANDS, PublishError, env, http
 
 LABEL = "LinkedIn (personal profile)"
 MODE = "api"
@@ -31,6 +31,37 @@ def escape(text: str) -> str:
         else:
             out.append("".join("\\" + c if c in RESERVED else c for c in part))
     return "".join(out)
+
+
+def load_mentions(brand: str | None) -> dict[str, str]:
+    """brands/<brand>/mentions.json: {"Replit": "urn:li:organization:1234", ...} (keys starting with _ ignored)."""
+    import json
+    f = BRANDS / (brand or "main") / "mentions.json"
+    if not f.exists():
+        return {}
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise PublishError(f"{f.relative_to(BRANDS.parent)} is not valid JSON: {e}")
+    return {k: v for k, v in data.items() if not k.startswith("_") and re.fullmatch(r"urn:li:(organization|person):[\w-]+", str(v))}
+
+
+def expand_mentions(text: str, brand: str | None) -> str:
+    """Turn @Replit into a real LinkedIn tag when brands/<brand>/mentions.json knows its URN."""
+    known = load_mentions(brand)
+    if not known:
+        return text
+    names = sorted(known, key=len, reverse=True)
+    pattern = re.compile(r"(?<![\w@\[])@(" + "|".join(re.escape(n) for n in names) + r")(?![\w])")
+    return pattern.sub(lambda m: f"@[{m.group(1)}]({known[m.group(1)]})", text)
+
+
+def warnings(target, draft) -> list[str]:
+    """@Names in the caption that won't become real tags."""
+    known = load_mentions(draft.get("brand"))
+    loose = set(re.findall(r"(?<![\w@\[])@([A-Z][\w.&-]*)", target.get("caption") or "")) - set(known)
+    return [f"@{n} is plain text, not a tag - add its URN to brands/{draft.get('brand') or 'main'}/mentions.json"
+            for n in sorted(loose)]
 
 
 def check(target, media, info) -> list[str]:
@@ -115,7 +146,7 @@ def publish(target, media, account, ctx) -> dict:
     if account.get("expires_at") and time.time() > account["expires_at"]:
         raise PublishError("LinkedIn login expired (they last 60 days). Run ./sa connect linkedin again.")
     token, author = account["access_token"], account["person_urn"]
-    body = {"author": author, "commentary": escape(target.get("caption", "")), "visibility": "PUBLIC",
+    body = {"author": author, "commentary": escape(expand_mentions(target.get("caption", ""), ctx.get("brand"))), "visibility": "PUBLIC",
             "distribution": {"feedDistribution": "MAIN_FEED", "targetEntities": [],
                              "thirdPartyDistributionChannels": []},
             "lifecycleState": "PUBLISHED", "isReshareDisabledByAuthor": False}
@@ -135,11 +166,11 @@ def publish(target, media, account, ctx) -> dict:
     return {"id": post_id, "url": f"https://www.linkedin.com/feed/update/{post_id}/" if post_id else None}
 
 
-def edit(target, account, post_id: str, caption: str) -> None:
+def edit(target, account, post_id: str, caption: str, brand: str | None = None) -> None:
     """Replace the text of a live post (Posts API PARTIAL_UPDATE). Media can't be changed."""
     if account.get("expires_at") and time.time() > account["expires_at"]:
         raise PublishError("LinkedIn login expired (they last 60 days). Run ./sa connect linkedin again.")
     r = http("POST", f"{API}/posts/{quote(post_id, safe='')}", what="LinkedIn edit post", final=True,
              headers={**headers(account["access_token"]), "X-RestLi-Method": "PARTIAL_UPDATE"},
-             json={"patch": {"$set": {"commentary": escape(caption)}}})
+             json={"patch": {"$set": {"commentary": escape(expand_mentions(caption, brand))}}})
     ok(r)

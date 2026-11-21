@@ -76,6 +76,9 @@ def check_draft(d: Path, draft: dict, only: set[str] | None = None) -> list[str]
             problems.append(f"{key}: {mod.LABEL} can't post {info['kind']} posts.")
             continue
         problems += [f"{key}: {p}" for p in mod.check(t, media, info)]
+        if hasattr(mod, "warnings"):
+            for w in mod.warnings(t, draft):
+                print(f"Warning - {key}: {w}")
         if mod.MODE == "api":
             try:
                 _, account = get_account(getattr(mod, "ACCOUNTS_FROM", t["platform"]), t.get("account"))
@@ -121,7 +124,7 @@ def run_targets(d: Path, draft: dict, only: set[str] | None) -> Path:
     media = draft_media(d, draft)
     info = media_info(media)
     ctx = {"kind": info["kind"], "draft_dir": d, "alt_text": draft.get("alt_text"), "title": draft.get("title"),
-           "thumbnail_at": draft.get("thumbnail_at"), "duration": info.get("duration"),
+           "thumbnail_at": draft.get("thumbnail_at"), "brand": draft.get("brand"), "duration": info.get("duration"),
            "orientation": info.get("orientation")}
     draft.setdefault("results", {})
     for t in sorted(draft["targets"], key=lambda t: platforms.sort_key(t["platform"])):
