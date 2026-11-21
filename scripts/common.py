@@ -311,5 +311,41 @@ def append_history(entry: dict) -> None:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+class DraftLock:
+    """Stops two publishes of the same draft running at once (e.g. a scheduled run and a manual one).
+    Lives outside the draft folder because the folder is moved to posted/ while locked."""
+
+    def __init__(self, draft_dir: Path):
+        self.path = ROOT / ".cache" / "locks" / f"{draft_dir.name}.lock"
+
+    def _holder_alive(self) -> bool:
+        try:
+            pid = int(self.path.read_text().split()[0])
+            os.kill(pid, 0)
+            return True
+        except (OSError, ValueError, IndexError):
+            return False
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for _ in range(2):
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                if self._holder_alive():
+                    raise SystemExit("This draft is already being published by another run "
+                                     f"(lock: {self.path.relative_to(ROOT)}). Wait for it to finish.")
+                self.path.unlink(missing_ok=True)  # left behind by a crashed run
+                continue
+            with os.fdopen(fd, "w") as f:
+                f.write(f"{os.getpid()} {now_iso()}\n")
+            return self
+        raise SystemExit(f"Could not lock {self.path}")
+
+    def __exit__(self, *exc):
+        self.path.unlink(missing_ok=True)
+        return False
+
+
 def print_json(data) -> None:
     print(json.dumps(data, indent=2, ensure_ascii=False))

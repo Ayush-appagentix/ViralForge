@@ -24,7 +24,7 @@ from pathlib import Path
 import requests
 
 import platforms
-from common import (DRAFTS, POSTED, ROOT, OutcomeUnknown, PublishError, append_history, draft_media, get_account,
+from common import (DRAFTS, POSTED, ROOT, DraftLock, OutcomeUnknown, PublishError, append_history, draft_media, get_account,
                     is_wsl, load_draft, media_kind, now_iso, probe, resolve_draft, save_draft, target_key)
 
 TASK_PATH = "\\SocialAgent\\"
@@ -225,7 +225,12 @@ def main() -> None:
         log = (DRAFTS / "_scheduled.log").open("a", encoding="utf-8")
         sys.stdout = sys.stderr = log
         print(f"\n=== {now_iso()} scheduled publish of {d.name}")
-    draft = load_draft(d)
+    with DraftLock(d):
+        run(d, a)
+
+
+def run(d: Path, a: argparse.Namespace) -> None:
+    draft = load_draft(d)  # read inside the lock: another run may just have changed it
 
     if draft.get("status") in ("posted", "rejected"):
         sys.exit(f"This draft is already {draft['status']}.")
